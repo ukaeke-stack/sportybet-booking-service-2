@@ -32,7 +32,7 @@ function extractOutcomes(node, path = []) {
   const name = node.outcomeName ?? node.name ?? node.label ?? node.desc;
   const marketId = node.marketId ?? node.marketID ?? node.market?.id ?? node.market?.marketId;
   if (outcomeId != null && odds != null && Number(odds) > 1 && name) {
-    found.push({ outcomeId: String(outcomeId), marketId: marketId == null ? null : String(marketId), name: String(name), odds: Number(odds) });
+    found.push({ outcomeId: String(outcomeId), marketId: marketId == null ? null : String(marketId), name: String(name), odds: Number(odds), specifier: node.specifier ?? node.market?.specifier ?? null });
   }
   for (const [key, value] of Object.entries(node)) {
     if (['odds', 'price', 'value', 'outcomeOdds'].includes(key)) continue;
@@ -248,7 +248,7 @@ function analyzeEvent(event, marketFilter = null, selectedModels = ['market-impl
       });
       predictions.push({
         eventId: String(event.eventId ?? event.id ?? ''),
-        home, away, marketId, outcomeId: o.outcomeId, selection: o.name, odds: o.odds,
+        home, away, marketId, outcomeId: o.outcomeId, selection: o.name, odds: o.odds, specifier: o.specifier,
         probability: probability == null ? null : Number(probability.toFixed(4)),
         confidence: classify(probability), qualityScore: quality, source,
         liveStats: Object.keys(stats),

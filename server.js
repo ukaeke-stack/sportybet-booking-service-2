@@ -1,8 +1,10 @@
 const express = require("express");
+const path = require("path");
 const { analyzeEvent, rankPredictions, optimizeSlip, getPredictionModels, selectPredictionModels } = require("./analytics");
 
 const app = express();
 app.use(express.json({ limit: "256kb" }));
+app.use(express.static(path.join(__dirname, "public")));
 
 const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = process.env.SPORTYBET_API_BASE_URL || "https://www.sportybet.com";
@@ -95,6 +97,7 @@ function extractEvents(data) {
 app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "omegaplus-ai", staking: false });
 });
+app.get("/", (_req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 
 app.get("/api/fixtures", async (req, res) => {
   try {
@@ -186,6 +189,41 @@ app.post("/api/analyze", async (req, res) => {
   }
 });
 
+app.get("/api/over15", async (req, res) => {
+  try {
+    const models = selectPredictionModels(req.query.models ? String(req.query.models).split(",") : ["market-implied", "ensemble"]);
+    const minProbability = Math.min(Math.max(Number(req.query.minProbability || 0.78), 0.5), 0.99);
+    const limit = Math.min(Math.max(Number(req.query.limit || 25), 1), 25);
+    const params = new URLSearchParams({
+      sportId: "sr:sport:1", marketId: DEFAULT_MARKET_IDS, pageSize: "100", pageNum: "1",
+      todayGames: "false", timeline: String(Math.min(Math.max(Number(req.query.timeline || 720), 12), 720)), _t: String(Date.now())
+    });
+    const cacheParams = new URLSearchParams(params); cacheParams.delete("_t");
+    const key = `${REGION}:${cacheParams.toString()}`;
+    let data = fixtureCache.get(key);
+    const freshEnough = data && Date.now() - data.timestamp < CACHE_TTL_MS;
+    if (!freshEnough) {
+      let pending = fixtureInFlight.get(key);
+      if (!pending) {
+        pending = sportyFetch(`factsCenter/pcUpcomingEvents?${params}`)
+          .then(raw => ({ events: extractEvents(raw), totalNum: raw?.data?.totalNum ?? raw?.totalNum ?? null, timestamp: Date.now() }))
+          .finally(() => fixtureInFlight.delete(key));
+        fixtureInFlight.set(key, pending);
+      }
+      try { data = await pending; fixtureCache.set(key, data); }
+      catch (e) { if (!data) throw e; data = { ...data, stale: true, upstreamError: e.message }; }
+    }
+    const all = data.events.flatMap(e => analyzeEvent(e, "over 1.5", models).predictions)
+      .filter(p => /over\s*1\.5|over1\.5|o1\.5/i.test(p.selection));
+    const selected = rankPredictions(all, { minProbability, limit });
+    res.json({ ok:true, market:"Over 1.5 Goals", count:selected.length, requested:limit, stale:Boolean(data.stale),
+      warning:"Model probabilities are estimates, not guarantees. Live-stat signals are heuristic unless calibrated.",
+      selectedModels:models, predictions:selected });
+  } catch (error) {
+    res.status(error.status || 502).json({ ok:false, error:error.message, upstream:error.data || null });
+  }
+});
+
 app.get("/api/events/:eventId/markets", async (req, res) => {
   try {
     const eventId = String(req.params.eventId || "").trim();
@@ -195,6 +233,20 @@ app.get("/api/events/:eventId/markets", async (req, res) => {
   } catch (error) {
     res.status(error.status || 502).json({ ok: false, error: error.message, upstream: error.data || null });
   }
+});
+
+app.post("/api/over15/booking", async (req, res) => {
+  try {
+    const predictions = Array.isArray(req.body?.predictions) ? req.body.predictions.slice(0, 30) : [];
+    if (!predictions.length) return res.status(400).json({ ok:false, error:"predictions must contain at least one selection" });
+    const selections = predictions.map((p,i) => {
+      if (!p.eventId || !p.marketId || !p.outcomeId) throw Object.assign(new Error(`selection ${i+1} is missing eventId, marketId or outcomeId`), {status:400});
+      return {eventId:String(p.eventId), marketId:String(p.marketId), specifier:p.specifier == null ? "" : String(p.specifier), outcomeId:String(p.outcomeId)};
+    });
+    const data = await sportyFetch("orders/share", {method:"POST", body:JSON.stringify({selections})});
+    const payload=data?.data||data;
+    res.json({ok:true,staking:false,count:selections.length,bookingCode:payload?.shareCode||payload?.bookingCode||payload?.code||null,shareURL:payload?.shareURL||payload?.shareUrl||null,deadline:payload?.deadline||null});
+  } catch(error) { res.status(error.status||400).json({ok:false,error:error.message,upstream:error.data||null}); }
 });
 
 app.post("/api/booking", async (req, res) => {
