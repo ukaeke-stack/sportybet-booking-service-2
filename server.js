@@ -327,8 +327,7 @@ app.get("/api/multi-market", async (req, res) => {
     });
   } catch(error) {
     res.status(error.status||502).json({ok:false,error:error.message,upstream:error.data||null});
-  }
-}
+  }});
 
 app.get("/api/events/:eventId/markets", async (req, res) => {
   try {
