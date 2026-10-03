@@ -305,7 +305,7 @@ app.get("/api/market-families", (_req, res) => {
 app.get("/api/multi-market", async (req, res) => {
   try {
     const family = typeof req.query.family === "string" ? req.query.family.trim() : "";
-    const league = typeof req.query.league === "string" ? req.query.league.trim().toLowerCase() : "";
+    const leagues = typeof req.query.league === "string" ? req.query.league.split(",").map(x => x.trim().toLowerCase()).filter(Boolean) : [];
     const minProbability = Math.min(Math.max(Number(req.query.minProbability || 0.78), 0.5), 0.99);
     const limit = Math.min(Math.max(Number(req.query.limit || 25), 1), 50);
     const maxEvents = Math.min(Math.max(Number(req.query.maxEvents || 40), 1), 60);
@@ -336,7 +336,7 @@ app.get("/api/multi-market", async (req, res) => {
       if (!Number.isFinite(ts)) return false;
       const d=new Intl.DateTimeFormat("en-CA",{timeZone:"Africa/Lagos",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(ts<1e12?ts*1000:ts));
       return d===today;
-    }).filter(e => !league || String(e?.tournamentName || e?.tournament?.name || e?.categoryName || e?.leagueName || "").toLowerCase() === league).slice(0,maxEvents);
+    }).filter(e => !leagues.length || leagues.includes(String(e?.tournamentName || e?.tournament?.name || e?.categoryName || e?.leagueName || "").toLowerCase())).slice(0,maxEvents);
 
     const details = await mapWithConcurrency(todayEvents, 8, async event => {
       const eventId=String(event.eventId ?? event.id ?? "");
