@@ -1,37 +1,10 @@
-const $=id=>document.getElementById(id);let picks=[];let currentMode="multi";
-
-function setStatus(t){$("status").textContent=t}
-function render(rows){
-  $("rows").innerHTML=rows.length?rows.map((p,i)=>'<tr><td>'+(i+1)+'</td><td>'+esc((p.home||'?')+' vs '+(p.away||'?'))+'</td><td>'+esc(p.marketLabel||p.marketFamily||'?')+'</td><td>'+esc(p.selection||'?')+'</td><td>'+Number(p.odds||0).toFixed(2)+'</td><td>'+((Number(p.probability)||0)*100).toFixed(1)+'%</td><td>'+esc(p.source||'?')+'</td></tr>').join(''):'<tr><td colspan="7">No selections met the threshold.</td></tr>';
-  $("book").disabled=!rows.length;
-}
-async function run(url,label){
-  setStatus("Loading…");$("run").disabled=true;$("over15").disabled=true;$("book").disabled=true;$("result").textContent="";
-  $("rows").innerHTML='<tr><td colspan="7">Fetching today’s fixtures and markets…</td></tr>';
-  try{
-    const r=await fetch(url);const d=await r.json();if(!r.ok)throw new Error(d.error||"Analysis failed");
-    picks=d.predictions||[];currentMode=label;
-    $("summary").textContent='Selected '+picks.length+' of '+(d.requested||picks.length)+' requested • '+(d.todayEvents??"?")+' today events • '+(d.failedEvents||0)+' market fetch failures';
-    render(picks);setStatus("Done");
-  }catch(e){setStatus("Error");$("rows").innerHTML='<tr><td colspan="7" class="err">'+esc(e.message)+'</td></tr>'}
-  finally{$("run").disabled=false;$("over15").disabled=false;$("book").disabled=!picks.length}
-}
-$("run").onclick=()=>{const family=encodeURIComponent($("market").value);const min=encodeURIComponent($("min").value);const limit=encodeURIComponent($("limit").value);run('/api/multi-market?family='+family+'&minProbability='+min+'&limit='+limit,"multi")};
-$("over15").onclick=()=>{const min=encodeURIComponent($("min").value);const limit=encodeURIComponent(Math.min(Number($("limit").value)||25,25));run('/api/over15?minProbability='+min+'&limit='+limit,"over15")};
-
-async function book(){
-  $("book").disabled=true;setStatus("Creating…");$("result").textContent="";
-  const endpoint=currentMode==="over15"?"/api/over15/booking":"/api/booking";
-  const body=currentMode==="over15"?{predictions:picks}:{selections:picks.map(p=>({eventId:p.eventId,marketId:p.marketId,specifier:p.specifier||"",outcomeId:p.outcomeId}))};
-  try{
-    const r=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const d=await r.json();
-    if(d.bookingCode){$("result").textContent="Booking code: "+d.bookingCode+(d.shareURL?"\n"+d.shareURL:"");setStatus("Booking ready");return}
-    if(d.fallbackAvailable&&d.fallback){
-      const lines=(d.fallback.selections||[]).map((s,i)=>(i+1)+'. '+(s.home||'?')+' vs '+(s.away||'?')+' — '+(s.selection||'Selection')+' @ '+(s.odds||'?')).join('\n');
-      $("result").innerHTML='<strong>Direct booking API unavailable.</strong><br>'+esc(d.error||"SportyBet rejected the share request.")+'<br><br><a class="fallback-link" href="'+esc(d.fallback.url)+'" target="_blank" rel="noopener">Open SportyBet</a><br><br><pre>'+esc(lines)+'</pre><small>Use the listed selections in the SportyBet betslip and its Book Bet/share control. Omegaplus does not place or stake bets.</small>';
-      setStatus("Website fallback ready");return
-    }
-    throw new Error(d.error||"Booking code failed");
-  }catch(e){$("result").textContent=e.message;setStatus("Error")}finally{$("book").disabled=!picks.length}
-}
-function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+const $=id=>document.getElementById(id);let picks=[],slip=JSON.parse(localStorage.getItem("omegaplusSlip")||"[]"),mode="multi";
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));function save(){localStorage.setItem("omegaplusSlip",JSON.stringify(slip));renderSlip()}function stats(){ $("selected").textContent=slip.length;$("slipCount").textContent=slip.length;$("slipTotal").textContent=slip.length;$("threshold").textContent=Math.round(Number($("min").value||.78)*100)+"%";$("book").disabled=!slip.length}
+function renderSlip(){$("slipRows").innerHTML=slip.length?slip.map((p,i)=>'<div class="slipRow"><button class="remove" data-r="'+i+'">×</button><b>'+esc((p.home||"?")+" vs "+(p.away||"?"))+'</b><span>'+esc(p.selection||"?")+' • '+Number(p.odds||0).toFixed(2)+'</span></div>').join(""):'<div class="empty">No selections yet.</div>';document.querySelectorAll("[data-r]").forEach(b=>b.onclick=()=>{slip.splice(+b.dataset.r,1);save()});stats()}
+function add(p){let k=[p.eventId,p.marketId,p.specifier,p.outcomeId].join("|");if(!slip.some(x=>[x.eventId,x.marketId,x.specifier,x.outcomeId].join("|")===k))slip.push(p);save()}
+function render(rows){$("empty").style.display=rows.length?"none":"block";$("cards").innerHTML=rows.map((p,i)=>'<article class="card"><div class="cardTop"><span>'+esc(p.marketLabel||p.marketFamily||"Football")+'</span><span class="prob">'+((+p.probability||0)*100).toFixed(1)+'%</span></div><div class="match">'+esc((p.home||"?")+" vs "+(p.away||"?"))+'</div><div class="pick"><span>'+esc(p.selection||"?")+'</span><span class="odds">@ '+Number(p.odds||0).toFixed(2)+'</span></div><div class="actions"><button data-a="'+i+'">Add to slip</button><button data-d="'+i+'">Details</button></div></article>').join("");document.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>{add(rows[+b.dataset.a]);b.textContent="Added";b.classList.add("added")});document.querySelectorAll("[data-d]").forEach(b=>b.onclick=()=>{let p=rows[+b.dataset.d];$("result").textContent=(p.home||"?")+" vs "+(p.away||"?")+"\n"+(p.selection||"?")+"\nProbability: "+((+p.probability||0)*100).toFixed(1)+"%\nOdds: "+Number(p.odds||0).toFixed(2)+"\nSource: "+(p.source||"market")})}
+async function run(url,m){mode=m;$("status").textContent="Loading…";$("analyze").disabled=true;$("over15").disabled=true;try{let r=await fetch(url),d=await r.json();if(!r.ok)throw Error(d.error||"Analysis failed");picks=d.predictions||[];$("matches").textContent=d.todayEvents??d.requested??"—";$("summary").textContent="Selected "+picks.length+" of "+(d.requested||picks.length)+" requested • "+(d.todayEvents??"?")+" today events";render(picks);$("status").textContent="Ready"}catch(e){$("empty").innerHTML='<span class="err">'+esc(e.message)+'</span>';$("status").textContent="Error"}finally{$("analyze").disabled=false;$("over15").disabled=false}}
+function analyze(){run("/api/multi-market?family="+encodeURIComponent($("market").value)+"&minProbability="+encodeURIComponent($("min").value)+"&limit="+encodeURIComponent($("limit").value))}function over(){run("/api/over15?minProbability="+encodeURIComponent($("min").value)+"&limit="+Math.min(+($("limit").value)||25,25),"over15")}
+async function book(){if(!slip.length)return;$("book").disabled=true;$("status").textContent="Creating…";let ep=mode==="over15"?"/api/over15/booking":"/api/booking",body=mode==="over15"?{predictions:slip}:{selections:slip.map(p=>({eventId:p.eventId,marketId:p.marketId,specifier:p.specifier||"",outcomeId:p.outcomeId}))};try{let r=await fetch(ep,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}),d=await r.json();if(d.bookingCode){$("result").textContent="Booking code: "+d.bookingCode+(d.shareURL?"\n"+d.shareURL:"");$("status").textContent="Booking ready";return}if(d.fallbackAvailable){let lines=(d.fallback.selections||[]).map((s,i)=>(i+1)+". "+(s.home||"?")+" vs "+(s.away||"?")+" — "+(s.selection||"?")+" @ "+(s.odds||"?")).join("\n");$("result").textContent="Direct booking API unavailable.\n"+(d.error||"SportyBet rejected the request.")+"\n\nOpen SportyBet: "+d.fallback.url+"\n\n"+lines;$("status").textContent="Fallback ready";return}throw Error(d.error||"Booking failed")}catch(e){$("result").textContent=e.message;$("status").textContent="Error"}finally{$("book").disabled=!slip.length}}
+async function models(){try{let d=await (await fetch("/api/prediction-models")).json();$("models").innerHTML=(d.models||[]).map(m=>'<div class="model"><strong>'+esc(m.name)+'</strong><small>'+esc(m.status||"available")+" • "+esc(m.description||"")+"</small></div>").join("")}catch{}}
+$("analyze").onclick=analyze;$("over15").onclick=over;$("refresh").onclick=analyze;$("book").onclick=book;$("clear").onclick=()=>{slip=[];save();$("result").textContent=""};$("modelsRefresh").onclick=models;$("min").oninput=stats;$("market").onchange=analyze;renderSlip();models();stats();analyze();
