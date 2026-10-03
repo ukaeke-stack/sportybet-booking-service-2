@@ -59,10 +59,51 @@ function scoreQuality({ probability, odds, hasMarket, hasTeams, dataCompleteness
 
 function classify(probability) {
   if (probability == null) return 'unknown';
-  if (probability >= 0.85) return 'very-high';
-  if (probability >= 0.78) return 'high';
-  if (probability >= 0.68) return 'medium';
+  if (probability >= 0.90) return 'very-high';
+  if (probability >= 0.82) return 'high';
+  if (probability >= 0.70) return 'medium';
   return 'low';
+}
+
+const MARKET_PROFILES = [
+  { id:'goals', name:'Goals O/U', test:/^(over|under)\s*\d+(?:\.\d+)?$/i },
+  { id:'btts', name:'BTTS', test:/^(yes|no|gg|ng)$/i },
+  { id:'1x2', name:'Home / Draw / Away', test:/^(home|draw|away|1|x|2)$/i },
+  { id:'double-chance', name:'Double Chance', test:/(home or draw|draw or away|home or away|1x|x2|12)/i },
+  { id:'dnb', name:'Draw No Bet', test:/draw no bet|no bet/i },
+  { id:'asian-handicap', name:'Asian Handicap', test:/asian handicap|\([+-]?\d+(?:\.\d+)?\)/i },
+  { id:'handicap', name:'Handicap', test:/^handicap|^home \([+-]?\d|^away \([+-]?\d/i },
+  { id:'corners', name:'Corners', test:/corner/i },
+  { id:'cards', name:'Cards / Bookings', test:/card|booking|bookings/i },
+  { id:'team-goals', name:'Team Goals', test:/(home|away).*?(team|goals?)|team.*?(over|under)/i },
+  { id:'first-half', name:'First Half', test:/(1st|first) half/i },
+  { id:'combo', name:'Goal / Result Combos', test:/smart combo|\s\/\s|&/i },
+  { id:'correct-score', name:'Correct Score', test:/^\d+\s*[:\-]\s*\d+$|correct score/i }
+];
+
+function marketFamily(selection, marketId = '', specifier = '') {
+  const text = String(selection || '').trim();
+  const id = String(marketId || '').split(':')[0];
+  if (id === '18' || /over|under/i.test(text) && !/corner|card/i.test(text)) {
+    if (/(1st|first) half/i.test(text)) return 'first-half';
+    return 'goals';
+  }
+  for (const profile of MARKET_PROFILES) if (profile.test.test(text)) return profile.id;
+  if (/gg|ng|both teams/i.test(text)) return 'btts';
+  if (/correct score/i.test(text)) return 'correct-score';
+  if (/corner/i.test(text)) return 'corners';
+  if (/card|booking/i.test(text)) return 'cards';
+  if (/handicap/i.test(text)) return /asian/i.test(text) ? 'asian-handicap' : 'handicap';
+  if (/1x2|home|draw|away/i.test(text)) return '1x2';
+  return 'other';
+}
+
+function marketLabel(family) {
+  return MARKET_PROFILES.find(x => x.id === family)?.name || family;
+}
+
+function listMarketFamilies() {
+  return MARKET_PROFILES.map(x => ({ id:x.id, name:x.name }));
 }
 
 const PREDICTION_MODELS = [
@@ -234,6 +275,7 @@ function analyzeEvent(event, marketFilter = null, selectedModels = ['market-impl
     for (const o of normalized) {
       const label = o.name.toLowerCase();
       if (marketFilter && !label.includes(marketFilter.toLowerCase())) continue;
+      const family = marketFamily(o.name, o.marketId, o.specifier);
       const isOver15 = /over\s*1\.5|over1\.5|o1\.5/.test(label);
       let probability = o.probability;
       let source = 'market-implied';
@@ -256,6 +298,8 @@ function analyzeEvent(event, marketFilter = null, selectedModels = ['market-impl
         eventId: String(event.eventId ?? event.id ?? ''),
         home, away, marketId, outcomeId: o.outcomeId, selection: o.name, odds: o.odds, specifier: o.specifier,
         probability: probability == null ? null : Number(probability.toFixed(4)),
+        marketFamily: family,
+        marketLabel: marketLabel(family),
         confidence: classify(probability), qualityScore: quality, source,
         liveStats: Object.keys(stats),
         liveSignal: isOver15 && live ? Number(live.score.toFixed(4)) : null
@@ -265,8 +309,9 @@ function analyzeEvent(event, marketFilter = null, selectedModels = ['market-impl
   return { eventId: String(event.eventId ?? event.id ?? ''), home, away, predictions, stats, liveSignal: live };
 }
 
-function rankPredictions(predictions, { minProbability = 0.78, limit = 25, maxOdds = null, minOdds = null } = {}) {
+function rankPredictions(predictions, { minProbability = 0.78, limit = 25, maxOdds = null, minOdds = null, family = null } = {}) {
   return predictions.filter(p => p.probability != null)
+    .filter(p => !family || p.marketFamily === family)
     .filter(p => p.probability >= minProbability)
     .filter(p => maxOdds == null || p.odds <= maxOdds)
     .filter(p => minOdds == null || p.odds >= minOdds)
@@ -300,5 +345,6 @@ function selectPredictionModels(modelIds) {
 module.exports = {
   impliedProbability, normalizeMarketProbabilities, extractNamedTeams, extractOutcomes, extractLiveStats,
   liveOver15Signal, analyzeEvent, rankPredictions, optimizeSlip, classify,
-  PREDICTION_MODELS, getPredictionModels, selectPredictionModels
+  PREDICTION_MODELS, getPredictionModels, selectPredictionModels,
+  MARKET_PROFILES, marketFamily, marketLabel, listMarketFamilies
 };
