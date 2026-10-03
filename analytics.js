@@ -136,6 +136,69 @@ function optimizeSlip(predictions, { size = 10, bankers = [], excluded = [] } = 
 
 const PREDICTION_MODELS = [
   {
+    id: 'shots',
+    name: 'Shots',
+    type: 'live',
+    status: 'data-dependent',
+    description: 'Live total and team shot statistics.'
+  },
+  {
+    id: 'shots-on-target',
+    name: 'Shots on Target',
+    type: 'live',
+    status: 'data-dependent',
+    description: 'Live shots-on-target statistics.'
+  },
+  {
+    id: 'possession',
+    name: 'Possession',
+    type: 'live',
+    status: 'data-dependent',
+    description: 'Live possession percentages.'
+  },
+  {
+    id: 'dangerous-attacks',
+    name: 'Dangerous Attacks',
+    type: 'live',
+    status: 'data-dependent',
+    description: 'Live dangerous-attack statistics.'
+  },
+  {
+    id: 'corners',
+    name: 'Corners',
+    type: 'live',
+    status: 'data-dependent',
+    description: 'Live corner statistics.'
+  },
+  {
+    id: 'cards',
+    name: 'Cards',
+    type: 'live',
+    status: 'data-dependent',
+    description: 'Live yellow/card statistics.'
+  },
+  {
+    id: 'goals',
+    name: 'Goals',
+    type: 'live',
+    status: 'data-dependent',
+    description: 'Current match score and goal events.'
+  },
+  {
+    id: 'xg',
+    name: 'xG',
+    type: 'live',
+    status: 'data-dependent',
+    description: 'Live expected-goals statistics.'
+  },
+  {
+    id: 'red-cards',
+    name: 'Red Cards',
+    type: 'live',
+    status: 'data-dependent',
+    description: 'Live red-card statistics.'
+  },
+  {
     id: 'market-implied',
     name: 'Market Probability',
     type: 'pre-match',
@@ -143,67 +206,11 @@ const PREDICTION_MODELS = [
     description: 'Normalizes market odds into an implied probability.'
   },
   {
-    id: 'live-momentum',
-    name: 'Live Momentum',
-    type: 'live',
-    status: 'data-dependent',
-    description: 'Uses live match pressure and event/stat changes when supplied by the feed.'
-  },
-  {
-    id: 'live-xg',
-    name: 'Live xG',
-    type: 'live',
-    status: 'data-dependent',
-    description: 'Uses live expected-goals data when supplied by the feed.'
-  },
-  {
-    id: 'live-form',
-    name: 'Live Form',
-    type: 'live',
-    status: 'data-dependent',
-    description: 'Uses current form inputs when supplied by the feed.'
-  },
-  {
-    id: 'live-h2h',
-    name: 'Live H2H',
-    type: 'live',
-    status: 'data-dependent',
-    description: 'Uses historical head-to-head inputs when supplied by the feed.'
-  },
-  {
-    id: 'live-goal-trend',
-    name: 'Live Goal Trend',
-    type: 'live',
-    status: 'data-dependent',
-    description: 'Uses current goal-rate and match-state inputs when supplied by the feed.'
-  },
-  {
-    id: 'live-btts',
-    name: 'Live BTTS',
-    type: 'live',
-    status: 'data-dependent',
-    description: 'Uses live both-teams-to-score signals when supplied by the feed.'
-  },
-  {
-    id: 'live-corners',
-    name: 'Live Corners',
-    type: 'live',
-    status: 'data-dependent',
-    description: 'Uses live corner statistics when supplied by the feed.'
-  },
-  {
-    id: 'live-cards',
-    name: 'Live Cards',
-    type: 'live',
-    status: 'data-dependent',
-    description: 'Uses live card statistics when supplied by the feed.'
-  },
-  {
     id: 'ensemble',
     name: 'Omegaplus Ensemble',
     type: 'ensemble',
     status: 'available',
-    description: 'Combines the selected model outputs that have sufficient input data; it does not invent missing signals.'
+    description: 'Combines selected prediction signals when their required data is available.'
   }
 ];
 
