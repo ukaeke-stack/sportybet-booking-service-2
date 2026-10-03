@@ -133,6 +133,90 @@ function optimizeSlip(predictions, { size = 10, bankers = [], excluded = [] } = 
   return [...locked, ...rest].slice(0, Math.max(size, locked.length));
 }
 
+
+const PREDICTION_MODELS = [
+  {
+    id: 'market-implied',
+    name: 'Market Probability',
+    type: 'pre-match',
+    status: 'available',
+    description: 'Normalizes market odds into an implied probability.'
+  },
+  {
+    id: 'live-momentum',
+    name: 'Live Momentum',
+    type: 'live',
+    status: 'data-dependent',
+    description: 'Uses live match pressure and event/stat changes when supplied by the feed.'
+  },
+  {
+    id: 'live-xg',
+    name: 'Live xG',
+    type: 'live',
+    status: 'data-dependent',
+    description: 'Uses live expected-goals data when supplied by the feed.'
+  },
+  {
+    id: 'live-form',
+    name: 'Live Form',
+    type: 'live',
+    status: 'data-dependent',
+    description: 'Uses current form inputs when supplied by the feed.'
+  },
+  {
+    id: 'live-h2h',
+    name: 'Live H2H',
+    type: 'live',
+    status: 'data-dependent',
+    description: 'Uses historical head-to-head inputs when supplied by the feed.'
+  },
+  {
+    id: 'live-goal-trend',
+    name: 'Live Goal Trend',
+    type: 'live',
+    status: 'data-dependent',
+    description: 'Uses current goal-rate and match-state inputs when supplied by the feed.'
+  },
+  {
+    id: 'live-btts',
+    name: 'Live BTTS',
+    type: 'live',
+    status: 'data-dependent',
+    description: 'Uses live both-teams-to-score signals when supplied by the feed.'
+  },
+  {
+    id: 'live-corners',
+    name: 'Live Corners',
+    type: 'live',
+    status: 'data-dependent',
+    description: 'Uses live corner statistics when supplied by the feed.'
+  },
+  {
+    id: 'live-cards',
+    name: 'Live Cards',
+    type: 'live',
+    status: 'data-dependent',
+    description: 'Uses live card statistics when supplied by the feed.'
+  },
+  {
+    id: 'ensemble',
+    name: 'Omegaplus Ensemble',
+    type: 'ensemble',
+    status: 'available',
+    description: 'Combines the selected model outputs that have sufficient input data; it does not invent missing signals.'
+  }
+];
+
+function getPredictionModels() {
+  return PREDICTION_MODELS.map(model => ({ ...model }));
+}
+
+function selectPredictionModels(modelIds) {
+  const ids = Array.isArray(modelIds) && modelIds.length ? modelIds.map(String) : ['market-implied'];
+  const selected = PREDICTION_MODELS.filter(model => ids.includes(model.id));
+  return selected.length ? selected : [PREDICTION_MODELS[0]];
+}
+
 module.exports = {
   impliedProbability,
   normalizeMarketProbabilities,
@@ -140,5 +224,8 @@ module.exports = {
   analyzeEvent,
   rankPredictions,
   optimizeSlip,
-  classify
+  classify,
+  PREDICTION_MODELS,
+  getPredictionModels,
+  selectPredictionModels
 };
