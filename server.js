@@ -216,7 +216,7 @@ app.get("/api/over15", async (req, res) => {
     const todayEvents = data.events.filter(isTodayLagos);\n    const all = todayEvents.flatMap(e => analyzeEvent(e, "over 1.5", models).predictions)
       .filter(p => /over\s*1\.5|over1\.5|o1\.5/i.test(p.selection));
     const selected = rankPredictions(all, { minProbability, limit });
-    res.json({ ok:true, market:"Over 1.5 Goals", count:selected.length, requested:limit, stale:Boolean(data.stale),
+    res.json({ ok:true, market:"Over 1.5 Goals", count:selected.length, requested:limit, todayEvents:todayEvents.length, stale:Boolean(data.stale),
       warning:"Model probabilities are estimates, not guarantees. Live-stat signals are heuristic unless calibrated.",
       selectedModels:models, predictions:selected });
   } catch (error) {
