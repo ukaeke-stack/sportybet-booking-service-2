@@ -250,7 +250,36 @@ app.post("/api/over15/booking", async (req, res) => {
       if (!p.eventId || !p.marketId || !p.outcomeId) throw Object.assign(new Error(`selection ${i+1} is missing eventId, marketId or outcomeId`), {status:400});
       return {eventId:String(p.eventId), marketId:String(p.marketId), specifier:p.specifier == null ? "" : String(p.specifier), outcomeId:String(p.outcomeId)};
     });
-    const data = await sportyFetch("orders/share", {method:"POST", body:JSON.stringify({selections})});
+    let data;
+    try {
+      data = await sportyFetch("orders/share", {method:"POST", body:JSON.stringify({selections})});
+    } catch (upstreamError) {
+      // SportyBet can reject the anonymous share API while the normal website
+      // still supports creating a booking code. Return a browser fallback
+      // instead of pretending the code was created.
+      const upstream = upstreamError?.data || null;
+      return res.status(503).json({
+        ok: false,
+        fallbackAvailable: true,
+        error: upstreamError.message,
+        upstream,
+        fallback: {
+          type: "website",
+          url: `${BASE_URL}/${REGION}/`,
+          selections: selections.map((s, i) => ({
+            number: i + 1,
+            eventId: s.eventId,
+            marketId: s.marketId,
+            specifier: s.specifier,
+            outcomeId: s.outcomeId,
+            home: predictions[i]?.home || null,
+            away: predictions[i]?.away || null,
+            selection: predictions[i]?.selection || null,
+            odds: predictions[i]?.odds || null
+          }))
+        }
+      });
+    }
     const payload=data?.data||data;
     res.json({ok:true,staking:false,count:selections.length,bookingCode:payload?.shareCode||payload?.bookingCode||payload?.code||null,shareURL:payload?.shareURL||payload?.shareUrl||null,deadline:payload?.deadline||null});
   } catch(error) { res.status(error.status||400).json({ok:false,error:error.message,upstream:error.data||null}); }
