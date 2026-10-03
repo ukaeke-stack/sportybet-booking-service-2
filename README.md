@@ -53,17 +53,18 @@ Optional environment variables:
 
 ## Selectable prediction models
 
-The prediction engine exposes these selectable models:
+The live prediction engine is designed around these match statistics:
 
+- Shots
+- Shots on Target
+- Possession
+- Dangerous Attacks
+- Corners
+- Cards
+- Goals
+- xG
+- Red Cards
 - Market Probability
-- Live Momentum
-- Live xG
-- Live Form
-- Live H2H
-- Live Goal Trend
-- Live BTTS
-- Live Corners
-- Live Cards
 - Omegaplus Ensemble
 
-Live models are marked data-dependent. They are selectable now, but the engine only uses a live signal when the required live data is actually supplied by the upstream feed; it does not fabricate live statistics.
+The live-stat models are data-dependent: they become analytically usable when the live feed supplies the corresponding match statistics.
