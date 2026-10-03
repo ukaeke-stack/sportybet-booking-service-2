@@ -213,7 +213,13 @@ app.get("/api/over15", async (req, res) => {
       try { data = await pending; fixtureCache.set(key, data); }
       catch (e) { if (!data) throw e; data = { ...data, stale: true, upstreamError: e.message }; }
     }
-    const todayEvents = data.events.filter(isTodayLagos);
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone:"Africa/Lagos", year:"numeric", month:"2-digit", day:"2-digit" }).format(new Date());
+    const todayEvents = data.events.filter(e => {
+      const ts = Number(e?.estimateStartTime ?? e?.startTime ?? e?.scheduledStartTime ?? e?.startTimestamp);
+      if (!Number.isFinite(ts)) return false;
+      const d = new Intl.DateTimeFormat("en-CA", { timeZone:"Africa/Lagos", year:"numeric", month:"2-digit", day:"2-digit" }).format(new Date(ts < 1e12 ? ts*1000 : ts));
+      return d === today;
+    });
     const all = todayEvents.flatMap(e => analyzeEvent(e, "over 1.5", models).predictions)
       .filter(p => /over\s*1\.5|over1\.5|o1\.5/i.test(p.selection));
     const selected = rankPredictions(all, { minProbability, limit });
