@@ -7,6 +7,7 @@ const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = process.env.SPORTYBET_API_BASE_URL || "https://www.sportybet.com";
 const REGION = process.env.SPORTYBET_REGION || "ng";
 const TIMEOUT_MS = Number(process.env.SPORTYBET_TIMEOUT_MS || 15000);
+const DEFAULT_MARKET_IDS = process.env.SPORTYBET_MARKET_IDS || "1,18,10,29,11,26,36,14,60100";
 
 function sportPath(path) {
   return `${BASE_URL}/api/${REGION}/${path.replace(/^\//, "")}`;
@@ -19,10 +20,12 @@ async function sportyFetch(path, options = {}) {
     const response = await fetch(sportPath(path), {
       ...options,
       headers: {
-        Accept: "application/json",
+        Accept: "application/json, text/plain, */*",
         "Content-Type": "application/json",
         "Current-Country": REGION.toUpperCase(),
-        "User-Agent": "Mozilla/5.0 (compatible; SportyBetBookingService/1.0)",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+        Referer: `${BASE_URL}/${REGION}/`,
+        Origin: BASE_URL,
         ...(options.headers || {})
       },
       signal: controller.signal
@@ -56,10 +59,13 @@ app.get("/api/fixtures", async (req, res) => {
   try {
     const search = typeof req.query.search === "string" ? req.query.search.trim().toLowerCase() : "";
     const date = typeof req.query.date === "string" ? req.query.date.trim() : "";
-    const marketId = typeof req.query.marketId === "string" ? req.query.marketId : "1";
+    const marketId = typeof req.query.marketId === "string" && req.query.marketId.trim()
+      ? req.query.marketId.trim()
+      : DEFAULT_MARKET_IDS;
     const pageSize = Math.min(Math.max(Number(req.query.pageSize || 100), 1), 100);
     const pageNum = Math.max(Number(req.query.pageNum || 1), 1);
     const timeline = Math.min(Math.max(Number(req.query.timeline || 720), 12), 720);
+
     const params = new URLSearchParams({
       sportId: "sr:sport:1",
       marketId,
@@ -69,15 +75,34 @@ app.get("/api/fixtures", async (req, res) => {
       timeline: String(timeline),
       _t: String(Date.now())
     });
+
     const data = await sportyFetch(`factsCenter/pcUpcomingEvents?${params.toString()}`);
-    const events = Array.isArray(data?.events) ? data.events
-      : Array.isArray(data?.data?.events) ? data.data.events
-      : Array.isArray(data?.results) ? data.results
-      : data?.data?.tournaments || data?.tournaments || [];
-    let list = Array.isArray(events) ? events : [];
+    const tournaments = Array.isArray(data?.data?.tournaments)
+      ? data.data.tournaments
+      : Array.isArray(data?.tournaments)
+        ? data.tournaments
+        : [];
+
+    let list = tournaments.flatMap(t => Array.isArray(t?.events) ? t.events : []);
+    if (!list.length) {
+      list = Array.isArray(data?.data?.events) ? data.data.events
+        : Array.isArray(data?.events) ? data.events
+        : Array.isArray(data?.results) ? data.results
+        : [];
+    }
+
     if (search) list = list.filter(e => JSON.stringify(e).toLowerCase().includes(search));
     if (date) list = list.filter(e => JSON.stringify(e).includes(date));
-    res.json({ ok: true, count: list.length, events: list });
+
+    res.json({
+      ok: true,
+      count: list.length,
+      totalNum: data?.data?.totalNum ?? null,
+      marketId,
+      pageNum,
+      pageSize,
+      events: list
+    });
   } catch (error) {
     res.status(error.status || 502).json({ ok: false, error: error.message, upstream: error.data || null });
   }
@@ -100,6 +125,7 @@ app.post("/api/booking", async (req, res) => {
     if (!Array.isArray(selections) || selections.length < 1 || selections.length > 30) {
       return res.status(400).json({ ok: false, error: "selections must contain between 1 and 30 items" });
     }
+
     const normalized = selections.map((s, index) => {
       if (!s || !s.eventId || !s.marketId || !s.outcomeId) {
         throw new Error(`selection ${index + 1} requires eventId, marketId and outcomeId`);
@@ -111,15 +137,18 @@ app.post("/api/booking", async (req, res) => {
         outcomeId: String(s.outcomeId).trim()
       };
     });
+
     const data = await sportyFetch("orders/share", {
       method: "POST",
       body: JSON.stringify({ selections: normalized })
     });
+
     res.json({
       ok: true,
       staking: false,
       bookingCode: data?.data?.shareCode || data?.shareCode || data?.bookingCode || data?.code || null,
-      shareURL: data?.data?.shareUrl || data?.shareURL || data?.shareUrl || null,
+      shareURL: data?.data?.shareURL || data?.data?.shareUrl || data?.shareURL || data?.shareUrl || null,
+      deadline: data?.data?.deadline || data?.deadline || null,
       data
     });
   } catch (error) {
