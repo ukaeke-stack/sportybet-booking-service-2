@@ -171,13 +171,13 @@ app.post("/api/analyze", async (req, res) => {
       ? req.body.marketFilter.trim() : null;
     const minProbability = Number.isFinite(Number(req.body?.minProbability)) ? Number(req.body.minProbability) : 0.78;
     const limit = Math.min(Math.max(Number(req.body?.limit || 25), 1), 100);
-    const predictions = events.flatMap(event => analyzeEvent(event, marketFilter).predictions);
+    const predictions = events.flatMap(event => analyzeEvent(event, marketFilter, models).predictions);
     const ranked = rankPredictions(predictions, { minProbability, limit });
     res.json({
       ok: true,
       app: "Omegaplus AI",
       selectedModels: models,
-      modelInputs: models.map(m => ({ id: m.id, status: m.status })),
+      modelInputs: models.map(m => ({ id: m.id, status: m.status, type: m.type })),
       count: ranked.length,
       predictions: ranked
     });
