@@ -20,23 +20,29 @@ function extractNamedTeams(event) {
   return { home, away };
 }
 
-function extractOutcomes(node, path = []) {
+function extractOutcomes(node, path = [], context = {}) {
   const found = [];
-  if (!node || typeof node !== 'object') return found;
+  if (!node || typeof node !== "object") return found;
   if (Array.isArray(node)) {
-    for (const item of node) found.push(...extractOutcomes(item, path));
+    for (const item of node) found.push(...extractOutcomes(item, path, context));
     return found;
   }
-  const outcomeId = node.outcomeId ?? node.outcomeID ?? node.id;
+  const ownMarketId = node.marketId ?? node.marketID ?? node.market?.id ?? node.market?.marketId ??
+    (Array.isArray(node.outcomes) ? node.id : context.marketId);
+  const ownSpecifier = node.specifier ?? node.market?.specifier ?? context.specifier ?? null;
+  const outcomeId = node.outcomeId ?? node.outcomeID ?? (context.marketId ? node.id : node.outcomeId ?? node.outcomeID);
   const odds = node.odds ?? node.price ?? node.value ?? node.outcomeOdds;
   const name = node.outcomeName ?? node.name ?? node.label ?? node.desc;
-  const marketId = node.marketId ?? node.marketID ?? node.market?.id ?? node.market?.marketId;
-  if (outcomeId != null && odds != null && Number(odds) > 1 && name) {
-    found.push({ outcomeId: String(outcomeId), marketId: marketId == null ? null : String(marketId), name: String(name), odds: Number(odds), specifier: node.specifier ?? node.market?.specifier ?? null });
+  if (outcomeId != null && odds != null && Number(odds) > 1 && name && context.marketId) {
+    found.push({ outcomeId: String(outcomeId), marketId: String(context.marketId), name: String(name), odds: Number(odds), specifier: ownSpecifier });
   }
+  const childContext = {
+    marketId: ownMarketId ?? context.marketId ?? null,
+    specifier: ownSpecifier
+  };
   for (const [key, value] of Object.entries(node)) {
-    if (['odds', 'price', 'value', 'outcomeOdds'].includes(key)) continue;
-    found.push(...extractOutcomes(value, path.concat(key)));
+    if (["odds", "price", "value", "outcomeOdds"].includes(key)) continue;
+    found.push(...extractOutcomes(value, path.concat(key), childContext));
   }
   return found;
 }
