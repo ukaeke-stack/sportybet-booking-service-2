@@ -196,7 +196,7 @@ app.get("/api/over15", async (req, res) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 25), 1), 25);
     const params = new URLSearchParams({
       sportId: "sr:sport:1", marketId: DEFAULT_MARKET_IDS, pageSize: "100", pageNum: "1",
-      todayGames: "false", timeline: String(Math.min(Math.max(Number(req.query.timeline || 720), 12), 720)), _t: String(Date.now())
+      todayGames: "true", timeline: String(Math.min(Math.max(Number(req.query.timeline || 720), 12), 720)), _t: String(Date.now())
     });
     const cacheParams = new URLSearchParams(params); cacheParams.delete("_t");
     const key = `${REGION}:${cacheParams.toString()}`;
