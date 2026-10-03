@@ -1,0 +1,31 @@
+name: Deploy Omegaplus to Railway
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_PROJECT_ID: "4a244f5b-843b-48b1-92ef-288b4a12ff34"
+      RAILWAY_ENVIRONMENT: "production"
+      RAILWAY_SERVICE: "sportybet-booking-service"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy current main commit
+        run: |
+          railway up --ci \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT" \
+            --service "$RAILWAY_SERVICE" \
+            --message "GitHub Actions deploy $GITHUB_SHA"
