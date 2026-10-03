@@ -239,6 +239,35 @@ app.get("/api/over15", async (req, res) => {
   }
 });
 
+async function fetchFixtures({ timeline = 720, pageSize = 100, pageNum = 1, todayGames = false } = {}) {
+  const params = new URLSearchParams({ sportId:"sr:sport:1", marketId:DEFAULT_MARKET_IDS, pageSize:String(Math.min(Math.max(Number(pageSize)||100,1),100)), pageNum:String(Math.max(Number(pageNum)||1,1)), todayGames:String(Boolean(todayGames)), timeline:String(Math.min(Math.max(Number(timeline)||720,12),720)), _t:String(Date.now()) });
+  const cacheParams=new URLSearchParams(params); cacheParams.delete("_t");
+  const key=REGION+":"+cacheParams.toString();
+  const cached=fixtureCache.get(key); if(cached&&Date.now()-cached.timestamp<CACHE_TTL_MS)return cached.events;
+  let pending=fixtureInFlight.get(key);
+  if(!pending){ pending=sportyFetch("factsCenter/pcUpcomingEvents?"+params.toString()).then(raw=>{const events=extractEvents(raw);fixtureCache.set(key,{events,totalNum:raw?.data?.totalNum??raw?.totalNum??null,timestamp:Date.now()});return events;}).finally(()=>fixtureInFlight.delete(key)); fixtureInFlight.set(key,pending); }
+  return pending;
+}
+const PARSE_BOOKING_URL=process.env.PARSE_BOOKING_URL||"https://api.parse.bot/scraper/8e652912-d760-4522-85ce-071e539a9c12/book_bet";
+const PARSE_API_KEY=process.env.PARSE_API_KEY||"";
+const BOOKING_PROVIDER=String(process.env.BOOKING_PROVIDER||"auto").toLowerCase();
+async function parseBookBet(selections){
+  if(!PARSE_API_KEY){const e=new Error("Parse booking provider is not configured");e.code="PARSE_NOT_CONFIGURED";throw e;}
+  const c=new AbortController(),timer=setTimeout(()=>c.abort(),TIMEOUT_MS);
+  try{const response=await fetch(PARSE_BOOKING_URL,{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json","X-API-Key":PARSE_API_KEY},body:JSON.stringify({selections:JSON.stringify(selections)}),signal:c.signal});
+    const text=await response.text();let data;try{data=JSON.parse(text)}catch{data={raw:text}};
+    if(!response.ok){const e=new Error("Parse booking provider returned HTTP "+response.status);e.status=response.status;e.data=data;throw e;}
+    const p=data?.data||data,bookingCode=p?.shareCode||p?.bookingCode||p?.code||null;
+    if(!bookingCode){const e=new Error("Parse booking provider did not return a booking/share code");e.status=502;e.data=data;throw e;}
+    return{bookingCode,shareURL:p?.shareURL||p?.shareUrl||null,deadline:p?.deadline||null,unavailableOutcomes:p?.unavailableOutcomes||[]};
+  }finally{clearTimeout(timer);}
+}
+async function createBooking(selections){
+  if((BOOKING_PROVIDER==="parse"||BOOKING_PROVIDER==="auto")&&PARSE_API_KEY){try{return{provider:"parse",...(await parseBookBet(selections))};}catch(e){if(BOOKING_PROVIDER==="parse")throw e;console.warn("Parse booking failed; falling back to direct SportyBet: "+e.message);}}
+  const data=await sportyFetch("orders/share",{method:"POST",body:JSON.stringify({selections})}),p=data?.data||data,bookingCode=p?.shareCode||p?.bookingCode||p?.code||null;
+  if(!bookingCode){const e=new Error("SportyBet did not return a booking/share code");e.status=502;e.data=data;throw e;}
+  return{provider:"sportybet",bookingCode,shareURL:p?.shareURL||p?.shareUrl||null,deadline:p?.deadline||null,unavailableOutcomes:p?.unavailableOutcomes||[]};
+}
 async function getEventMarkets(eventId) {
   const key = String(eventId);
   const cached = eventMarketCache.get(key);
@@ -357,7 +386,7 @@ app.post("/api/over15/booking", async (req, res) => {
     });
     let data;
     try {
-      data = await sportyFetch("orders/share", {method:"POST", body:JSON.stringify({selections})});
+      data = await createBooking(selections);
     } catch (upstreamError) {
       // SportyBet can reject the anonymous share API while the normal website
       // still supports creating a booking code. Return a browser fallback
