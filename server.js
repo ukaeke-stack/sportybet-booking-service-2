@@ -213,7 +213,8 @@ app.get("/api/over15", async (req, res) => {
       try { data = await pending; fixtureCache.set(key, data); }
       catch (e) { if (!data) throw e; data = { ...data, stale: true, upstreamError: e.message }; }
     }
-    const todayEvents = data.events.filter(isTodayLagos);\n    const all = todayEvents.flatMap(e => analyzeEvent(e, "over 1.5", models).predictions)
+    const todayEvents = data.events.filter(isTodayLagos);
+    const all = todayEvents.flatMap(e => analyzeEvent(e, "over 1.5", models).predictions)
       .filter(p => /over\s*1\.5|over1\.5|o1\.5/i.test(p.selection));
     const selected = rankPredictions(all, { minProbability, limit });
     res.json({ ok:true, market:"Over 1.5 Goals", count:selected.length, requested:limit, todayEvents:todayEvents.length, stale:Boolean(data.stale),
