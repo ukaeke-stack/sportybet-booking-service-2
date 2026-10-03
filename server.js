@@ -249,5 +249,5 @@ app.get("/api/booking/:code", async (req, res) => {
 app.use((_req, res) => res.status(404).json({ ok: false, error: "Not found" }));
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`SportyBet booking service listening on port ${PORT}`);
+  console.log(`Omegaplus AI listening on port ${PORT}`);
 });
