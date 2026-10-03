@@ -1,6 +1,6 @@
 const express = require("express");
 const path = require("path");
-const { analyzeEvent, rankPredictions, optimizeSlip, getPredictionModels, selectPredictionModels } = require("./analytics");
+const { analyzeEvent, rankPredictions, optimizeSlip, getPredictionModels, selectPredictionModels, extractOutcomes, listMarketFamilies } = require("./analytics");
 
 const app = express();
 app.use(express.json({ limit: "256kb" }));
@@ -16,6 +16,8 @@ const DEFAULT_MARKET_IDS = process.env.SPORTYBET_MARKET_IDS || "1,18,10,29,11,26
 
 const fixtureCache = new Map();
 const fixtureInFlight = new Map();
+const eventMarketCache = new Map();
+const eventMarketInFlight = new Map();
 
 function sportPath(path) {
   return `${BASE_URL}/api/${REGION}/${path.replace(/^\//, "")}`;
@@ -231,6 +233,103 @@ app.get("/api/over15", async (req, res) => {
   }
 });
 
+async function getEventMarkets(eventId) {
+  const key = String(eventId);
+  const cached = eventMarketCache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) return cached.data;
+  let pending = eventMarketInFlight.get(key);
+  if (!pending) {
+    pending = sportyFetch(`factsCenter/pcEventMarkets?eventId=${encodeURIComponent(key)}`)
+      .finally(() => eventMarketInFlight.delete(key));
+    eventMarketInFlight.set(key, pending);
+  }
+  const data = await pending;
+  eventMarketCache.set(key, { data, timestamp: Date.now() });
+  return data;
+}
+
+async function mapWithConcurrency(items, concurrency, worker) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  async function runWorker() {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      try { results[i] = await worker(items[i], i); }
+      catch (error) { results[i] = { error }; }
+    }
+  }
+  await Promise.all(Array.from({length: Math.min(concurrency, items.length)}, runWorker));
+  return results;
+}
+
+app.get("/api/market-families", (_req, res) => {
+  res.json({ ok:true, markets:listMarketFamilies() });
+});
+
+app.get("/api/multi-market", async (req, res) => {
+  try {
+    const family = typeof req.query.family === "string" ? req.query.family.trim() : "";
+    const minProbability = Math.min(Math.max(Number(req.query.minProbability || 0.78), 0.5), 0.99);
+    const limit = Math.min(Math.max(Number(req.query.limit || 25), 1), 50);
+    const maxEvents = Math.min(Math.max(Number(req.query.maxEvents || 40), 1), 60);
+    const models = selectPredictionModels(req.query.models ? String(req.query.models).split(",") : ["market-implied","ensemble"]);
+
+    const params = new URLSearchParams({
+      sportId:"sr:sport:1", marketId:DEFAULT_MARKET_IDS, pageSize:"100", pageNum:"1",
+      todayGames:"true", timeline:String(Math.min(Math.max(Number(req.query.timeline || 720),12),720)), _t:String(Date.now())
+    });
+    const cacheParams = new URLSearchParams(params); cacheParams.delete("_t");
+    const key = `${REGION}:${cacheParams.toString()}`;
+    let data = fixtureCache.get(key);
+    if (!data || Date.now() - data.timestamp >= CACHE_TTL_MS) {
+      let pending = fixtureInFlight.get(key);
+      if (!pending) {
+        pending = sportyFetch(`factsCenter/pcUpcomingEvents?${params}`)
+          .then(raw => ({events:extractEvents(raw), totalNum:raw?.data?.totalNum ?? raw?.totalNum ?? null, timestamp:Date.now()}))
+          .finally(()=>fixtureInFlight.delete(key));
+        fixtureInFlight.set(key,pending);
+      }
+      data = await pending;
+      fixtureCache.set(key,data);
+    }
+
+    const today = new Intl.DateTimeFormat("en-CA",{timeZone:"Africa/Lagos",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+    const todayEvents = data.events.filter(e => {
+      const ts=Number(e?.estimateStartTime ?? e?.startTime ?? e?.scheduledStartTime ?? e?.startTimestamp);
+      if (!Number.isFinite(ts)) return false;
+      const d=new Intl.DateTimeFormat("en-CA",{timeZone:"Africa/Lagos",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(ts<1e12?ts*1000:ts));
+      return d===today;
+    }).slice(0,maxEvents);
+
+    const details = await mapWithConcurrency(todayEvents, 8, async event => {
+      const eventId=String(event.eventId ?? event.id ?? "");
+      if (!eventId) return event;
+      const markets=await getEventMarkets(eventId);
+      return {...event, marketData:markets};
+    });
+    const predictions = details.flatMap(event => {
+      if (event?.error) return [];
+      const eventId=String(event.eventId ?? event.id ?? "");
+      const marketData=event.marketData;
+      const rows=extractOutcomes(marketData);
+      if (!rows.length) return analyzeEvent(event,family||null,models).predictions;
+      const synthetic={...event, outcomes:rows};
+      return analyzeEvent(synthetic,family||null,models).predictions;
+    });
+    const selected=rankPredictions(predictions,{minProbability,limit,family:family||null});
+    res.json({
+      ok:true, marketFamily:family||"all", marketCount:listMarketFamilies().length,
+      count:selected.length, requested:limit, todayEvents:todayEvents.length,
+      failedEvents:details.filter(x=>x?.error).length,
+      warning:"Probabilities are model/market estimates, not guarantees. Market-implied probabilities are normalized odds; live signals are heuristic unless calibrated.",
+      selectedModels:models, predictions:selected
+    });
+  } catch(error) {
+    res.status(error.status||502).json({ok:false,error:error.message,upstream:error.data||null});
+  }
+}
+
 app.get("/api/events/:eventId/markets", async (req, res) => {
   try {
     const eventId = String(req.params.eventId || "").trim();
@@ -304,20 +403,24 @@ app.post("/api/booking", async (req, res) => {
       };
     });
 
-    const data = await sportyFetch("orders/share", {
-      method: "POST",
-      body: JSON.stringify({ selections: normalized })
-    });
-
+    let data;
+    try {
+      data = await sportyFetch("orders/share", {
+        method: "POST",
+        body: JSON.stringify({ selections: normalized })
+      });
+    } catch (upstreamError) {
+      return res.status(503).json({
+        ok:false, fallbackAvailable:true, error:upstreamError.message, upstream:upstreamError.data||null,
+        fallback:{type:"website",url:`${BASE_URL}/${REGION}/`,selections:normalized}
+      });
+    }
     const payload = data?.data || data;
-    res.json({
-      ok: true,
-      staking: false,
-      bookingCode: payload?.shareCode || payload?.bookingCode || payload?.code || null,
-      shareURL: payload?.shareURL || payload?.shareUrl || null,
-      deadline: payload?.deadline || null,
-      data
-    });
+    const bookingCode=payload?.shareCode || payload?.bookingCode || payload?.code || null;
+    if (!bookingCode) {
+      return res.status(502).json({ok:false,error:"SportyBet did not return a booking/share code",data});
+    }
+    res.json({ok:true,staking:false,bookingCode,shareURL:payload?.shareURL||payload?.shareUrl||null,deadline:payload?.deadline||null});
   } catch (error) {
     res.status(error.status || 400).json({ ok: false, error: error.message, upstream: error.data || null });
   }
