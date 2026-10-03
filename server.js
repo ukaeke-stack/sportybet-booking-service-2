@@ -12,6 +12,7 @@ const CACHE_TTL_MS = Number(process.env.SPORTYBET_CACHE_TTL_MS || 90000);
 const DEFAULT_MARKET_IDS = process.env.SPORTYBET_MARKET_IDS || "1,18,10,29,11,26,36,14,60100";
 
 const fixtureCache = new Map();
+const fixtureInFlight = new Map();
 
 function sportPath(path) {
   return `${BASE_URL}/api/${REGION}/${path.replace(/^\//, "")}`;
@@ -50,8 +51,10 @@ async function sportyFetch(path, options = {}, attempt = 0) {
     let data;
     try { data = JSON.parse(text); } catch { data = { raw: text }; }
 
-    if ((response.status === 403 || response.status === 429) && attempt < MAX_RETRIES) {
-      await sleep(750 * Math.pow(2, attempt));
+    // 403 is a hard upstream block; retrying it only adds delay.
+    // Retry transient throttling/server errors instead.
+    if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
+      await sleep(300 * Math.pow(2, attempt));
       return sportyFetch(path, options, attempt + 1);
     }
 
@@ -112,7 +115,11 @@ app.get("/api/fixtures", async (req, res) => {
       _t: String(Date.now())
     });
 
-    const cacheKey = `${REGION}:${params.toString()}`;
+    // Exclude the cache-busting timestamp from our internal cache key.
+    // Otherwise every request becomes a cache miss.
+    const cacheParams = new URLSearchParams(params);
+    cacheParams.delete("_t");
+    const cacheKey = `${REGION}:${cacheParams.toString()}`;
     const cached = fixtureCache.get(cacheKey);
     let events;
     let totalNum = null;
@@ -121,9 +128,19 @@ app.get("/api/fixtures", async (req, res) => {
       events = cached.events;
       totalNum = cached.totalNum;
     } else {
-      const data = await sportyFetch(`factsCenter/pcUpcomingEvents?${params.toString()}`);
-      events = extractEvents(data);
-      totalNum = data?.data?.totalNum ?? data?.totalNum ?? null;
+      let pending = fixtureInFlight.get(cacheKey);
+      if (!pending) {
+        pending = sportyFetch(`factsCenter/pcUpcomingEvents?${params.toString()}`)
+          .then(data => ({
+            events: extractEvents(data),
+            totalNum: data?.data?.totalNum ?? data?.totalNum ?? null
+          }))
+          .finally(() => fixtureInFlight.delete(cacheKey));
+        fixtureInFlight.set(cacheKey, pending);
+      }
+      const fresh = await pending;
+      events = fresh.events;
+      totalNum = fresh.totalNum;
       fixtureCache.set(cacheKey, { events, totalNum, timestamp: Date.now() });
     }
 
