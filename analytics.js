@@ -34,7 +34,7 @@ function extractOutcomes(node, path = [], context = {}) {
   const odds = node.odds ?? node.price ?? node.value ?? node.outcomeOdds;
   const name = node.outcomeName ?? node.name ?? node.label ?? node.desc;
   if (outcomeId != null && odds != null && Number(odds) > 1 && name && context.marketId) {
-    found.push({ outcomeId: String(outcomeId), marketId: String(context.marketId), name: String(name), odds: Number(odds), specifier: ownSpecifier });
+    found.push({ outcomeId: String(outcomeId), marketId: String(context.marketId).split(":")[0], name: String(name), odds: Number(odds), specifier: ownSpecifier });
   }
   const childContext = {
     marketId: ownMarketId ?? context.marketId ?? null,
