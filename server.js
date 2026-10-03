@@ -390,6 +390,37 @@ app.post("/api/over15/booking", async (req, res) => {
   } catch(error) { res.status(error.status||400).json({ok:false,error:error.message,upstream:error.data||null}); }
 });
 
+function validateBookingSelections(selections, events) {
+  const byEvent = new Map(events.map(e => [String(e.eventId), e]));
+  const errors = [];
+  for (const s of selections) {
+    const event = byEvent.get(String(s.eventId));
+    if (!event) {
+      errors.push(`Event ${s.eventId} is not in the current SportyBet feed.`);
+      continue;
+    }
+    const markets = Array.isArray(event.markets) ? event.markets : [];
+    const market = markets.find(m =>
+      String(m.id ?? m.marketId) === String(s.marketId) &&
+      (s.specifier == null || String(m.specifier ?? "") === String(s.specifier))
+    );
+    if (!market) {
+      errors.push(`Market ${s.marketId}${s.specifier ? ` (${s.specifier})` : ""} is not available for ${event.homeTeamName || event.homeTeam?.name || "Home"} vs ${event.awayTeamName || event.awayTeam?.name || "Away"}.`);
+      continue;
+    }
+    const outcomes = Array.isArray(market.outcomes) ? market.outcomes : [];
+    const outcome = outcomes.find(o => String(o.id ?? o.outcomeId) === String(s.outcomeId));
+    if (!outcome) {
+      errors.push(`Outcome ${s.outcomeId} is not available on market ${s.marketId} for event ${s.eventId}.`);
+      continue;
+    }
+    if (outcome.isActive === false || market.status === "suspended") {
+      errors.push(`Selection ${s.eventId}/${s.marketId}/${s.outcomeId} is no longer active.`);
+    }
+  }
+  return errors;
+}
+
 app.post("/api/booking", async (req, res) => {
   try {
     const selections = req.body?.selections;
@@ -408,6 +439,20 @@ app.post("/api/booking", async (req, res) => {
         outcomeId: String(s.outcomeId).trim()
       };
     });
+
+    // Refresh the live catalogue immediately before creating the share code.
+    // This prevents stale selections/odds from reaching SportyBet's share endpoint.
+    const live = await fetchFixtures({ timeline: 720, pageSize: 100, pageNum: 1, todayGames: false });
+    const validationErrors = validateBookingSelections(normalized, live);
+    if (validationErrors.length) {
+      return res.status(409).json({
+        ok:false,
+        error:"One or more selections are stale or unavailable.",
+        validationErrors,
+        fallbackAvailable:true,
+        fallback:{type:"website",url:`${BASE_URL}/${REGION}/`,selections:normalized}
+      });
+    }
 
     let data;
     try {
