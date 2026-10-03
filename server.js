@@ -87,7 +87,13 @@ function extractEvents(data) {
   const tournaments = Array.isArray(data?.data?.tournaments)
     ? data.data.tournaments
     : Array.isArray(data?.tournaments) ? data.tournaments : [];
-  let events = tournaments.flatMap(t => Array.isArray(t?.events) ? t.events : []);
+  let events = tournaments.flatMap(t => Array.isArray(t?.events) ? t.events.map(e => ({
+    ...e,
+    tournamentName: e?.tournamentName || t?.tournamentName || t?.name || t?.tournament?.name || null,
+    categoryName: e?.categoryName || t?.categoryName || t?.category?.name || null,
+    tournamentId: e?.tournamentId || t?.tournamentId || t?.id || null,
+    categoryId: e?.categoryId || t?.categoryId || t?.category?.id || null
+  })) : []);
   if (!events.length) {
     events = Array.isArray(data?.data?.events) ? data.data.events
       : Array.isArray(data?.events) ? data.events
