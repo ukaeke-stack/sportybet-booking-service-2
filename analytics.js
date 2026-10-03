@@ -219,7 +219,7 @@ function analyzeEvent(event, marketFilter = null, selectedModels = ['market-impl
   const raw = extractOutcomes(event);
   const groups = new Map();
   for (const row of raw) {
-    const key = row.marketId || 'unknown';
+    const key = row.marketId ? `${row.marketId}:${row.specifier ?? ''}` : 'unknown';
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(row);
   }
