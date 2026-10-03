@@ -1,6 +1,6 @@
-# SportyBet Booking Service
+# Omegaplus AI
 
-Non-staking HTTP service for finding SportyBet football events and creating share/booking codes from real event, market, specifier, and outcome IDs.
+Omegaplus AI is a non-staking football analysis service for finding SportyBet events, selecting prediction models, ranking predictions, and creating share/booking codes from real event, market, specifier, and outcome IDs.
 
 ## Boundary
 
@@ -11,6 +11,8 @@ This service does not place bets, stake money, access a user's SportyBet account
 - GET /health
 - GET /api/fixtures?search=&date=
 - GET /api/events/:eventId/markets
+- GET /api/prediction-models
+- POST /api/analyze
 - POST /api/booking
 - GET /api/booking/:code
 
@@ -48,3 +50,21 @@ Optional environment variables:
 - SPORTYBET_REGION (default: ng)
 - SPORTYBET_COUNTRY (default: NG)
 - SPORTYBET_TIMEOUT_MS (default: 15000)
+
+## Selectable prediction models
+
+The live prediction engine is designed around these match statistics:
+
+- Shots
+- Shots on Target
+- Possession
+- Dangerous Attacks
+- Corners
+- Cards
+- Goals
+- xG
+- Red Cards
+- Market Probability
+- Omegaplus Ensemble
+
+The live-stat models are data-dependent: they become analytically usable when the live feed supplies the corresponding match statistics.

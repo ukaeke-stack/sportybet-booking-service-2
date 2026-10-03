@@ -1,4 +1,5 @@
 const express = require("express");
+const { analyzeEvent, rankPredictions, optimizeSlip, getPredictionModels, selectPredictionModels } = require("./analytics");
 
 const app = express();
 app.use(express.json({ limit: "256kb" }));
@@ -92,7 +93,7 @@ function extractEvents(data) {
 }
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "sportybet-booking-service", staking: false });
+  res.json({ ok: true, service: "omegaplus-ai", staking: false });
 });
 
 app.get("/api/fixtures", async (req, res) => {
@@ -154,6 +155,34 @@ app.get("/api/fixtures", async (req, res) => {
       error: error.message,
       upstream: error.data || null
     });
+  }
+});
+
+app.get("/api/prediction-models", (_req, res) => {
+  res.json({ ok: true, app: "Omegaplus AI", models: getPredictionModels() });
+});
+
+app.post("/api/analyze", async (req, res) => {
+  try {
+    const events = Array.isArray(req.body?.events) ? req.body.events : [];
+    if (!events.length) return res.status(400).json({ ok: false, error: "events must contain at least one event" });
+    const models = selectPredictionModels(req.body?.models);
+    const marketFilter = typeof req.body?.marketFilter === "string" && req.body.marketFilter.trim()
+      ? req.body.marketFilter.trim() : null;
+    const minProbability = Number.isFinite(Number(req.body?.minProbability)) ? Number(req.body.minProbability) : 0.78;
+    const limit = Math.min(Math.max(Number(req.body?.limit || 25), 1), 100);
+    const predictions = events.flatMap(event => analyzeEvent(event, marketFilter, models).predictions);
+    const ranked = rankPredictions(predictions, { minProbability, limit });
+    res.json({
+      ok: true,
+      app: "Omegaplus AI",
+      selectedModels: models,
+      modelInputs: models.map(m => ({ id: m.id, status: m.status, type: m.type })),
+      count: ranked.length,
+      predictions: ranked
+    });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error.message });
   }
 });
 
@@ -220,5 +249,5 @@ app.get("/api/booking/:code", async (req, res) => {
 app.use((_req, res) => res.status(404).json({ ok: false, error: "Not found" }));
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`SportyBet booking service listening on port ${PORT}`);
+  console.log(`Omegaplus AI listening on port ${PORT}`);
 });
