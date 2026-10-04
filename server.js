@@ -200,8 +200,11 @@ app.post("/api/analyze", async (req, res) => {
 app.get("/api/over15", async (req, res) => {
   try {
     const models = selectPredictionModels(req.query.models ? String(req.query.models).split(",") : ["market-implied", "ensemble"]);
-    const minProbability = Math.min(Math.max(Number(req.query.minProbability || 0.78), 0.5), 0.99);
+    const requestedMin = Number(req.query.minProbability);
+    const minProbability = Math.min(Math.max(Number.isFinite(requestedMin) ? requestedMin : 0.65, 0.5), 0.99);
     const limit = Math.min(Math.max(Number(req.query.limit || 25), 1), 25);
+    const maxEvents = Math.min(Math.max(Number(req.query.maxEvents || 60), 1), 80);
+
     const params = new URLSearchParams({
       sportId: "sr:sport:1", marketId: DEFAULT_MARKET_IDS, pageSize: "100", pageNum: "1",
       todayGames: "true", timeline: String(Math.min(Math.max(Number(req.query.timeline || 720), 12), 720)), _t: String(Date.now())
@@ -210,32 +213,85 @@ app.get("/api/over15", async (req, res) => {
     const key = `${REGION}:${cacheParams.toString()}`;
     let data = fixtureCache.get(key);
     const freshEnough = data && Date.now() - data.timestamp < CACHE_TTL_MS;
+
     if (!freshEnough) {
       let pending = fixtureInFlight.get(key);
       if (!pending) {
         pending = sportyFetch(`factsCenter/pcUpcomingEvents?${params}`)
-          .then(raw => ({ events: extractEvents(raw), totalNum: raw?.data?.totalNum ?? raw?.totalNum ?? null, timestamp: Date.now() }))
+          .then(raw => ({
+            events: extractEvents(raw),
+            totalNum: raw?.data?.totalNum ?? raw?.totalNum ?? null,
+            timestamp: Date.now()
+          }))
           .finally(() => fixtureInFlight.delete(key));
         fixtureInFlight.set(key, pending);
       }
-      try { data = await pending; fixtureCache.set(key, data); }
-      catch (e) { if (!data) throw e; data = { ...data, stale: true, upstreamError: e.message }; }
+      try {
+        data = await pending;
+        fixtureCache.set(key, data);
+      } catch (e) {
+        if (!data) throw e;
+        data = { ...data, stale: true, upstreamError: e.message };
+      }
     }
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone:"Africa/Lagos", year:"numeric", month:"2-digit", day:"2-digit" }).format(new Date());
+
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Africa/Lagos", year: "numeric", month: "2-digit", day: "2-digit"
+    }).format(new Date());
+
     const todayEvents = data.events.filter(e => {
       const ts = Number(e?.estimateStartTime ?? e?.startTime ?? e?.scheduledStartTime ?? e?.startTimestamp);
       if (!Number.isFinite(ts)) return false;
-      const d = new Intl.DateTimeFormat("en-CA", { timeZone:"Africa/Lagos", year:"numeric", month:"2-digit", day:"2-digit" }).format(new Date(ts < 1e12 ? ts*1000 : ts));
+      const d = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Africa/Lagos", year: "numeric", month: "2-digit", day: "2-digit"
+      }).format(new Date(ts < 1e12 ? ts * 1000 : ts));
       return d === today;
+    }).slice(0, maxEvents);
+
+    // The upcoming-events feed often contains fixtures but not their actual
+    // market outcomes. Load each event's live market catalogue before scoring.
+    const details = await mapWithConcurrency(todayEvents, 8, async event => {
+      const eventId = String(event.eventId ?? event.id ?? "");
+      if (!eventId) return event;
+      const marketData = await getEventMarkets(eventId);
+      return { ...event, marketData };
     });
-    const all = todayEvents.flatMap(e => analyzeEvent(e, "over 1.5", models).predictions)
-      .filter(p => /over\s*1\.5|over1\.5|o1\.5/i.test(p.selection));
-    const selected = rankPredictions(all, { minProbability, limit });
-    res.json({ ok:true, market:"Over 1.5 Goals", count:selected.length, requested:limit, todayEvents:todayEvents.length, stale:Boolean(data.stale),
-      warning:"Model probabilities are estimates, not guarantees. Live-stat signals are heuristic unless calibrated.",
-      selectedModels:models, predictions:selected });
+
+    const all = details.flatMap(event => {
+      if (event?.error) return [];
+      const rows = extractOutcomes(event.marketData);
+      if (!rows.length) return analyzeEvent(event, "over 1.5", models).predictions;
+      return analyzeEvent({ ...event, outcomes: rows }, "over 1.5", models).predictions;
+    }).filter(p => /over\s*1\.5|over1\.5|o1\.5/i.test(String(p.selection || "")));
+
+    let selected = rankPredictions(all, { minProbability, limit });
+
+    // Keep Daily Over 1.5 useful when the user has a strict probability
+    // threshold that would otherwise hide every valid market selection.
+    let thresholdUsed = minProbability;
+    if (!selected.length && all.length) {
+      thresholdUsed = 0.60;
+      selected = rankPredictions(all, { minProbability: thresholdUsed, limit });
+    }
+
+    res.json({
+      ok: true,
+      market: "Over 1.5 Goals",
+      count: selected.length,
+      requested: limit,
+      todayEvents: todayEvents.length,
+      candidateOver15: all.length,
+      thresholdRequested: minProbability,
+      thresholdUsed,
+      fallbackThresholdApplied: thresholdUsed !== minProbability,
+      failedEvents: details.filter(x => x?.error).length,
+      stale: Boolean(data.stale),
+      warning: "Model probabilities are estimates, not guarantees. Daily Over 1.5 falls back to 60% only when the requested threshold produces no selections.",
+      selectedModels: models,
+      predictions: selected
+    });
   } catch (error) {
-    res.status(error.status || 502).json({ ok:false, error:error.message, upstream:error.data || null });
+    res.status(error.status || 502).json({ ok: false, error: error.message, upstream: error.data || null });
   }
 });
 
