@@ -58,7 +58,7 @@ async function sportyFetch(path, options = {}, attempt = 0) {
 
     // 403 is a hard upstream block; retrying it only adds delay.
     // Retry transient throttling/server errors instead.
-    if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
+    if (options.retryable !== false && (response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
       await sleep(300 * Math.pow(2, attempt));
       return sportyFetch(path, options, attempt + 1);
     }
@@ -525,10 +525,47 @@ app.post("/api/booking", async (req, res) => {
       };
     });
 
-    // Refresh the live catalogue immediately before creating the share code.
-    // This prevents stale selections/odds from reaching SportyBet's share endpoint.
-    const live = await fetchFixtures({ timeline: 720, pageSize: 100, pageNum: 1, todayGames: false });
-    const validationErrors = validateBookingSelections(normalized, live);
+    // Refresh each selected event's market catalogue immediately before
+    // creating the share code. This avoids relying on a cached/upcoming feed
+    // whose market list may be incomplete or stale.
+    const liveDetails = await mapWithConcurrency(normalized, Math.min(6, normalized.length), async selection => {
+      return getEventMarkets(selection.eventId);
+    });
+    const validationErrors = [];
+    normalized.forEach((selection, index) => {
+      const marketData = liveDetails[index];
+      if (marketData?.error) {
+        validationErrors.push(`Could not refresh event ${selection.eventId} before booking: ${marketData.error.message}`);
+        return;
+      }
+      const eventMarkets = extractEvents(marketData);
+      // pcEventMarkets normally returns a market catalogue rather than a
+      // tournament list, so validate directly against any market-shaped nodes.
+      const marketNodes = [];
+      const walk = node => {
+        if (!node || typeof node !== "object") return;
+        if (Array.isArray(node)) return node.forEach(walk);
+        if ((node.id ?? node.marketId) != null && Array.isArray(node.outcomes)) marketNodes.push(node);
+        Object.values(node).forEach(walk);
+      };
+      walk(marketData);
+      const market = marketNodes.find(m =>
+        String(m.id ?? m.marketId).split(":")[0] === String(selection.marketId).split(":")[0] &&
+        String(m.specifier ?? "") === String(selection.specifier ?? "")
+      );
+      if (!market) {
+        validationErrors.push(`Market ${selection.marketId}${selection.specifier ? ` (${selection.specifier})` : ""} is no longer available for ${selection.eventId}.`);
+        return;
+      }
+      const outcome = market.outcomes.find(o => String(o.id ?? o.outcomeId) === String(selection.outcomeId));
+      if (!outcome) {
+        validationErrors.push(`Outcome ${selection.outcomeId} is no longer available for ${selection.eventId}.`);
+        return;
+      }
+      if (outcome.isActive === false || String(market.status || "").toLowerCase() === "suspended") {
+        validationErrors.push(`Selection ${selection.eventId}/${selection.marketId}/${selection.outcomeId} is suspended or inactive.`);
+      }
+    });
     if (validationErrors.length) {
       return res.status(409).json({
         ok:false,
