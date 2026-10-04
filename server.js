@@ -103,7 +103,7 @@ function extractEvents(data) {
 }
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "omegaplus-ai", staking: false });
+  res.json({ ok: true, service: "omegaplu-ai", staking: false });
 });
 app.get("/", (_req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 
@@ -170,7 +170,7 @@ app.get("/api/fixtures", async (req, res) => {
 });
 
 app.get("/api/prediction-models", (_req, res) => {
-  res.json({ ok: true, app: "Omegaplus AI", models: getPredictionModels() });
+  res.json({ ok: true, app: "Omegaplu AI", models: getPredictionModels() });
 });
 
 app.post("/api/analyze", async (req, res) => {
@@ -186,7 +186,7 @@ app.post("/api/analyze", async (req, res) => {
     const ranked = rankPredictions(predictions, { minProbability, limit });
     res.json({
       ok: true,
-      app: "Omegaplus AI",
+      app: "Omegaplu AI",
       selectedModels: models,
       modelInputs: models.map(m => ({ id: m.id, status: m.status, type: m.type })),
       count: ranked.length,
@@ -576,5 +576,5 @@ app.get("/api/booking/:code", async (req, res) => {
 app.use((_req, res) => res.status(404).json({ ok: false, error: "Not found" }));
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Omegaplus AI listening on port ${PORT}`);
+  console.log(`Omegaplu AI listening on port ${PORT}`);
 });
